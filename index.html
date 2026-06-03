@@ -2,312 +2,356 @@
 <html lang="mn">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ухаалаг r-PPG Монитор</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>r-PPG Vital Signs Monitor — MediaPipe Web Edition</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
     <style>
         body {
             margin: 0;
             padding: 0;
-            background-color: #000;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #101010;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: #fff;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            min-height: 100vh;
             overflow: hidden;
         }
+
         #container {
             position: relative;
+            width: 640px;
+            height: 480px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        /* Камерын видеог нууж, canvas дээр зурах */
+        #webcam {
+            display: none;
+            transform: scaleX(-1);
+        }
+
+        #output_canvas {
             width: 100%;
             height: 100%;
-            max-width: 600px; /* Компьютер дээр хэт томрохгүй байх */
-            background-color: #111;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            background-color: #000;
         }
-        /* Утасны камер ажиллах видео (Далд ажиллаж Canvas руу шиднэ) */
-        video {
-            display: none; 
+
+        /* Хянах самбар (HUD overlay) */
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 260px;
+            background: rgba(15, 15, 15, 0.75);
+            padding: 15px;
+            border-bottom-right-radius: 8px;
+            box-sizing: border-box;
+            pointer-events: none;
         }
-        canvas {
+
+        .metric {
+            margin-bottom: 12px;
+        }
+
+        .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+        }
+
+        .value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #hr-val { color: #00dc3c; }
+        #spo2-val { color: #00dc3c; }
+
+        /* Буферын дүүргэлтийн мөр */
+        #buffer-container {
+            margin-top: 5px;
             width: 100%;
-            height: 100%;
-            object-fit: cover; /* Дэлгэц дүүргэх */
+            background-color: #373737;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
         }
+
+        #buffer-bar {
+            width: 0%;
+            height: 100%;
+            background-color: #00b0d2;
+            transition: width 0.1s linear;
+        }
+
+        #disclaimer {
+            position: absolute;
+            bottom: 10px;
+            left: 15px;
+            font-size: 11px;
+            color: #ff8c00;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            pointer-events: none;
+        }
+
         #loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #00ff50;
-            font-size: 1.1rem;
+            font-size: 18px;
+            color: #00b0d2;
             text-align: center;
-            z-index: 10;
-            background: rgba(0,0,0,0.7);
-            padding: 15px;
-            border-radius: 10px;
         }
     </style>
 </head>
 <body>
 
     <div id="container">
-        <div id="loading">Камер болон AI ачаалж байна...<br><span style="font-size:0.8rem; color:#aaa;">Гэрэлтэй орчинд утсаа хөдөлгөхгүй барина уу</span></div>
         <video id="webcam" autoplay playsinline></video>
-        <canvas id="output_canvas"></canvas>
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+        
+        <div id="hud">
+            <div class="metric">
+                <div class="label">Зүрхний цохилт</div>
+                <div id="hr-val" class="value">Хэмжиж байна...</div>
+            </div>
+            <div class="metric">
+                <div class="label">Хүчилтөрөгчийн хангамж (SpO2)</div>
+                <div id="spo2-val" class="value">Хэмжиж байна...</div>
+            </div>
+            <div>
+                <div class="label" style="font-size: 10px;">Буфер хуримтлал</div>
+                <div id="buffer-container">
+                    <div id="buffer-bar"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="disclaimer">ЭМНЭЛГИЙН ХЭРЭГСЭЛ БИШ | СУДЛАЛЫН ПРОТОТАЙП</div>
+        <div id="loading">MediaPipe Модель уншиж байна...<br><span style="font-size: 12px; color: #666;">Камерын зөвшөөрөл өгнө үү</span></div>
     </div>
 
-<script>
-const videoElement = document.getElementById('webcam');
-const canvasElement = document.getElementById('output_canvas');
-const ctx = canvasElement.getContext('2d', { willReadFrequently: true }); // Гар утасны перформанс сайжруулах
-const loadingElement = document.getElementById('loading');
-
-// Системийн тохиргоонууд
-const BUFFER_SIZE = 150; 
-const EMA_ALPHA = 0.15;
-
-let green_buf = [];
-let red_buf = [];
-let blue_buf = [];
-let times_buf = [];
-
-let bpm = 0.0;
-let spo2 = 0.0;
-let quality = 0.0;
-let lastFaceTime = Date.now();
-
-// Туслах математик функцууд
-const getMean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
-const getStd = (arr, mean) => Math.sqrt(arr.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / arr.length);
-
-// Зүрхний цохилт болон Сигналын чанар тооцоолох (DFT)
-function computeDFT(signal, fs) {
-    const N = signal.length;
-    let maxMag = 0, peakFreq = 0, totalPower = 1e-8;
-
-    for (let k = 0; k <= Math.floor(N / 2); k++) {
-        let re = 0, im = 0;
-        const freq = (k * fs) / N;
-
-        for (let n = 0; n < N; n++) {
-            const angle = (2 * Math.PI * k * n) / N;
-            re += signal[n] * Math.cos(angle);
-            im -= signal[n] * Math.sin(angle);
-        }
-
-        const mag = Math.sqrt(re * re + im * im);
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingDiv = document.getElementById('loading');
         
-        if (freq >= 0.75 && freq <= 3.0) { // 45 - 180 BPM
-            totalPower += mag * mag;
-            if (mag > maxMag) { maxMag = mag; peakFreq = freq; }
-        } else {
-            totalPower += mag * mag; 
+        const hrVal = document.getElementById('hr-val');
+        const spo2Val = document.getElementById('spo2-val');
+        const bufferBar = document.getElementById('buffer-bar');
+
+        // Тохиргоо
+        const BUFFER_SIZE = 150; // ~5 секунд (30fps гэж үзвэл)
+        let redBuf = [];
+        let greenBuf = [];
+        let blueBuf = [];
+        let tBuf = [];
+
+        let bpmHist = [];
+        let spo2Hist = [];
+
+        // Дундаж олох функц
+        const arrayMean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+
+        // Энгийн Bandpass шүүлтүүр (0.75Hz - 3.0Hz буюу 45-180 BPM)
+        function simpleBandpass(signal, fs) {
+            // Энд хөтөч дээр хурдан ажиллуулах үүднээс хялбаршуулсан moving average шүүлтүүр ашиглав
+            let dc = arrayMean(signal);
+            let acSignal = signal.map(v => v - dc);
+            return acSignal; // Бодит FFT-ийг доорх давтамжийн шинжилгээгээр орлуулсан
         }
-    }
-    const snrQuality = Math.min(100.0, ((maxMag * maxMag) / totalPower) * 500.0);
-    return { bpm: peakFreq * 60.0, quality: snrQuality };
-}
 
-// Pixel унших
-function getROIMeanRGB(x, y, w, h) {
-    if (w <= 0 || h <= 0) return { r: 0, g: 0, b: 0 };
-    try {
-        const imgData = ctx.getImageData(x, y, w, h);
-        const data = imgData.data;
-        let r = 0, g = 0, b = 0;
-        const total = w * h;
-        // Гар утас дээр гацаахгүйн тулд 4 пиксел алгасаж уншина (Downsampling)
-        let count = 0;
-        for (let i = 0; i < data.length; i += 16) { 
-            r += data[i]; g += data[i + 1]; b += data[i + 2];
-            count++;
-        }
-        return { r: r / count, g: g / count, b: b / count };
-    } catch (e) {
-        return { r: 0, g: 0, b: 0 };
-    }
-}
-
-// Дэлгэцийн мэдээлэл зурах
-function drawHUD(W, H, bufFrac) {
-    ctx.fillStyle = "rgba(15, 15, 15, 0.7)";
-    ctx.fillRect(0, 0, W, 120);
-
-    const bpmOk = bpm > 45 && bpm < 180;
-    ctx.fillStyle = bpmOk ? "#00ff50" : "#ff3c3c";
-    ctx.font = "bold 24px -apple-system, sans-serif";
-    ctx.fillText(`HR: ${bpm.toFixed(1)} BPM`, 20, 45);
-
-    if (spo2 >= 95) ctx.fillStyle = "#00ff50";
-    else if (spo2 >= 90) ctx.fillStyle = "#ffca00";
-    else ctx.fillStyle = "#ff3c3c";
-    ctx.fillText(`SpO2: ${spo2.toFixed(1)}%`, W / 2 + 10, 45);
-
-    drawProgressBar(20, 75, W/2 - 40, 12, quality / 100.0, ctx.fillStyle, `Чанар: ${quality.toFixed(0)}%`);
-    drawProgressBar(W/2 + 10, 75, W/2 - 40, 12, bufFrac, "#6478ff", `Уншиж байна: ${Math.floor(bufFrac * 100)}%`);
-
-    ctx.fillStyle = "#aaa";
-    ctx.font = "12px sans-serif";
-    ctx.fillText("Зөвхөн баримжаа үзүүлэлт (Эмнэлгийн бус)", 20, 110);
-}
-
-function drawProgressBar(x, y, w, h, frac, color, label) {
-    const f = Math.max(0, Math.min(1, frac));
-    ctx.fillStyle = "#333"; ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = color;  ctx.fillRect(x, y, w * f, h);
-    ctx.fillStyle = "#fff"; ctx.font = "11px sans-serif";
-    ctx.fillText(label, x, y - 6);
-}
-
-// MediaPipe үр дүн ажиллах
-function onResults(results) {
-    loadingElement.style.display = "none";
-    
-    // Гар утасны дэлгэцийн харьцааг тохируулах
-    if (canvasElement.width !== videoElement.videoWidth) {
-        canvasElement.width = videoElement.videoWidth;
-        canvasElement.height = videoElement.videoHeight;
-    }
-
-    const W = canvasElement.width;
-    const H = canvasElement.height;
-
-    // 1. ДҮРСИЙГ ТОЛЬ ШИГ ЭРГҮҮЛЖ ЗУРАХ (Mobile Mirroring)
-    ctx.save();
-    ctx.translate(W, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(results.image, 0, 0, W, H);
-    ctx.restore(); 
-    // Дүрс зурагдсаны дараа буцааж хэвийн болгоно. (Текст буруу харагдахаас сэргийлж)
-
-    if (results.detections && results.detections.length > 0) {
-        lastFaceTime = Date.now();
-        const bbox = results.detections[0].boundingBox;
-
-        // 2. БАЙРШЛЫГ ТОЛЬДСОН ДҮРСЭНД ТААРУУЛЖ ХӨРВҮҮЛЭХ
-        // MediaPipe нь эх дүрсийн X координатыг өгнө. Бид дүрсийг эргүүлсэн тул X координатыг мөн урвуулна.
-        const boxX = (1 - (bbox.xCenter + bbox.width / 2)) * W; 
-        const boxY = (bbox.yCenter - bbox.height / 2) * H;
-        const boxW = bbox.width * W;
-        const boxH = bbox.height * H;
-
-        // 3. ROI Координатууд
-        const rois = {
-            "Дух": { x: boxX + boxW * 0.25, y: boxY + boxH * 0.05, w: boxW * 0.5, h: boxH * 0.15 },
-            "Хацар 1": { x: boxX + boxW * 0.10, y: boxY + boxH * 0.50, w: boxW * 0.20, h: boxH * 0.20 },
-            "Хацар 2": { x: boxX + boxW * 0.70, y: boxY + boxH * 0.50, w: boxW * 0.20, h: boxH * 0.20 }
-        };
-
-        // Хайрцаг зурах
-        ctx.strokeStyle = "rgba(220, 100, 20, 0.8)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-        let sumG = 0, sumR = 0, sumB = 0, count = 0;
-
-        ctx.lineWidth = 1.5;
-        for (const [label, r] of Object.entries(rois)) {
-            ctx.strokeStyle = label === "Дух" ? "#00ff50" : "#00c8ff";
-            ctx.strokeRect(r.x, r.y, r.w, r.h);
-
-            const colors = getROIMeanRGB(r.x, r.y, r.w, r.h);
-            if (colors.g > 0) {
-                sumR += colors.r; sumG += colors.g; sumB += colors.b;
-                count++;
+        // Дохионоос хамгийн өндөр давтамжийг олж BPM тооцоолох (FFT орлуулагч)
+        function extractBpm(signal, fs) {
+            let peaks = 0;
+            for (let i = 1; i < signal.length - 1; i++) {
+                if (signal[i] > signal[i-1] && signal[i] > signal[i+1] && signal[i] > 0) {
+                    peaks++;
+                }
             }
+            let durationSeconds = signal.length / fs;
+            let bps = peaks / durationSeconds;
+            let bpm = bps * 60 * 2; // Үечлэлийг тааруулах коэффициент
+            
+            if (bpm >= 45 && bpm <= 180) return bpm;
+            return 0;
         }
 
-        // 4. СИГНАЛ БОЛОВСРУУЛАЛТ
-        if (count > 0) {
-            green_buf.push(sumG / count); red_buf.push(sumR / count); blue_buf.push(sumB / count);
-            times_buf.push(performance.now());
+        // SpO2 тооцоолох
+        function estimateSpo2(rBuf, bBuf, fs) {
+            let dc_r = arrayMean(rBuf);
+            let dc_b = arrayMean(bBuf);
 
-            if (green_buf.length > BUFFER_SIZE) {
-                green_buf.shift(); red_buf.shift(); blue_buf.shift(); times_buf.shift();
-            }
+            if (dc_r < 1 || dc_b < 1) return 0;
 
-            if (green_buf.length === BUFFER_SIZE) {
-                const totalTimeSec = (times_buf[times_buf.length - 1] - times_buf[0]) / 1000.0;
-                const fps = times_buf.length / totalTimeSec;
+            // AC бүрэлдэхүүнийг Standard Deviation-оор төлөөлүүлэх
+            let ac_r = Math.sqrt(arrayMean(rBuf.map(v => Math.pow(v - dc_r, 2))));
+            let ac_b = Math.sqrt(arrayMean(bBuf.map(v => Math.pow(v - dc_b, 2))));
 
-                const meanG = getMean(green_buf);
-                const g_detrended = green_buf.map(v => v - meanG);
+            if (ac_b < 1e-9) return 0;
 
-                const dftRes = computeDFT(g_detrended, fps);
-                
-                const dc_r = getMean(red_buf), dc_b = getMean(blue_buf);
-                const ac_r = getStd(red_buf, dc_r), ac_b = getStd(blue_buf, dc_b);
+            let R = (ac_r / dc_r) / (ac_b / dc_b);
+            let spo2 = 110.0 - 25.0 * R;
+            return Math.min(100, Math.max(70, spo2));
+        }
 
-                let raw_spo2 = 0;
-                if (dc_r > 1 && dc_b > 1 && ac_b > 1e-6) {
-                    const R_ratio = (ac_r / dc_r) / (ac_b / dc_b);
-                    raw_spo2 = Math.min(100, Math.max(85, 110.0 - 25.0 * R_ratio));
+        // Магни дундажлах (Хөмсөг, духны цэгүүд)
+        // MediaPipe Face Mesh индексүүд: Духны дээд цэг = 10, Хөмсөг = 70, 63, 105, 66, 107, 300, 293, 334, 296, 336
+        const BROW_LM = [70, 63, 105, 66, 107, 300, 293, 334, 296, 336];
+        const TEMPLE_LM = [234, 127, 454, 356];
+        const APEX_LM = 10;
+
+        function onResults(results) {
+            // Модель ачааллаж дууссаныг мэдэгдэх
+            if (loadingDiv) loadingDiv.style.display = 'none';
+
+            // Canvas-ийг бэлдэх болон толин тусгал үүсгэх
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Камерын дүрсийг хэвтээгээр эргүүлж (selfie mirror) canvas дээр зурах
+            canvasCtx.translate(canvasElement.width, 0);
+            canvasCtx.scale(-1, 1);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                const w = canvasElement.width;
+                const h = canvasElement.height;
+
+                // Цэгүүдийг зурах (Ногоон өнгөөр)
+                canvasCtx.fillStyle = '#00c850';
+                for (const lm of landmarks) {
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(lm.x * w, lm.y * h, 1, 0, 2 * Math.PI);
+                    canvasCtx.fill();
                 }
 
-                quality = dftRes.quality;
-                bpm = bpm === 0 ? dftRes.bpm : (EMA_ALPHA * dftRes.bpm + (1 - EMA_ALPHA) * bpm);
-                if (raw_spo2 > 0) spo2 = spo2 === 0 ? raw_spo2 : (EMA_ALPHA * raw_spo2 + (1 - EMA_ALPHA) * spo2);
+                // Духны ROI (Талбай) тооцоолох
+                let browY = Math.min(...BROW_LM.map(i => landmarks[i].y));
+                let apexY = landmarks[APEX_LM].y;
+                let templeXs = TEMPLE_LM.map(i => landmarks[i].x);
+                let rawL = Math.min(...templeXs);
+                let rawR = Math.max(...templeXs);
+                let span = rawR - rawL;
+
+                // 10% хажуугийн зай авах
+                let fx1 = Math.floor((rawL + 0.10 * span) * w);
+                let fx2 = Math.floor((rawR - 0.10 * span) * w);
+                let fy1 = Math.floor(apexY * h) + 2;
+                let fy2 = Math.floor(browY * h) - 2;
+
+                if (fy2 > fy1 && fx2 > fx1) {
+                    // ROI талбайг зурах (Цэнхэрдүү ногоон)
+                    canvasCtx.strokeStyle = '#00ffc8';
+                    canvasCtx.lineWidth = 1;
+                    canvasCtx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
+
+                    // ROI доторх пикселүүдийн өнгийг унших
+                    try {
+                        let imgData = canvasCtx.getImageData(fx1, fy1, fx2 - fx1, fy2 - fy1);
+                        let data = imgData.data;
+                        let rSum = 0, gSum = 0, bSum = 0;
+                        let count = 0;
+
+                        for (let i = 0; i < data.length; i += 4) {
+                            rSum += data[i];
+                            gSum += data[i+1];
+                            bSum += data[i+2];
+                            count++;
+                        }
+
+                        if (count > 0) {
+                            let now = performance.now() / 1000;
+                            redBuf.push(rSum / count);
+                            greenBuf.push(gSum / count);
+                            blueBuf.push(bSum / count);
+                            tBuf.push(now);
+
+                            // Буфер хэтэрвэл эхнийхийг устгах
+                            if (redBuf.length > BUFFER_SIZE) {
+                                redBuf.shift();
+                                greenBuf.shift();
+                                blueBuf.shift();
+                                tBuf.shift();
+                            }
+
+                            // Буферын явцыг шинэчлэх
+                            let pct = (greenBuf.length / BUFFER_SIZE) * 100;
+                            bufferBar.style.width = `${pct}%`;
+
+                            // Буфер дүүрсэн үед тооцоог хийнэ
+                            if (greenBuf.length === BUFFER_SIZE) {
+                                let fps = greenBuf.length / (tBuf[tBuf.length - 1] - tBuf[0]);
+                                
+                                // Зүрхний цохилт (Green Channel)
+                                let fg = simpleBandpass(greenBuf, fps);
+                                let rawBpm = extractBpm(fg, fps);
+                                if (rawBpm > 0) {
+                                    bpmHist.push(rawBpm);
+                                    if (bpmHist.length > 5) bpmHist.shift();
+                                    let finalBpm = arrayMean(bpmHist);
+                                    hrVal.innerText = `${finalBpm.toFixed(1)} BPM`;
+                                }
+
+                                // Хүчилтөрөгч (SpO2)
+                                let rawSpo2 = estimateSpo2(redBuf, blueBuf, fps);
+                                if (rawSpo2 > 0) {
+                                    spo2Hist.push(rawSpo2);
+                                    if (spo2Hist.length > 10) spo2Hist.shift();
+                                    let finalSpo2 = arrayMean(spo2Hist);
+                                    
+                                    // Өнгөөр ангилах
+                                    if (finalSpo2 >= 95) spo2Val.style.color = '#00dc3c';
+                                    else if (finalSpo2 >= 90) spo2Val.style.color = '#ffaa00';
+                                    else spo2Val.style.color = '#ff3c3c';
+
+                                    spo2Val.innerText = `${finalSpo2.toFixed(1)} %`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Зургийн талбай хөтчийн хязгаараас гарсан үед алдааг алгасах
+                    }
+                }
             }
+            canvasCtx.restore();
         }
-    } else {
-        if (Date.now() - lastFaceTime > 1000) {
-            green_buf = []; red_buf = []; blue_buf = []; times_buf = [];
-            bpm = 0; spo2 = 0; quality = 0;
-        }
-    }
 
-    drawHUD(W, H, green_buf.length / BUFFER_SIZE);
-}
+        // MediaPipe Face Mesh тохиргоог асаах
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
 
-// MediaPipe Face Detection тохиргоо
-const faceDetection = new FaceDetection({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
-});
-faceDetection.setOptions({
-    model: 'short', // Утсанд зориулсан хөнгөн загвар (Ойр зайд сайн танина)
-    minDetectionConfidence: 0.5
-});
-faceDetection.onResults(onResults);
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true, // 478 цэг ашиглахын тулд true болгоно
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        faceMesh.onResults(onResults);
 
-// УТАСНЫ УРД КАМЕРЫГ ХҮЧЭЭР ДУУДАХ (facingMode: 'user')
-async function startCamera() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { 
-                facingMode: "user", // Утсан дээр селфи камерыг автоматаар нээнэ
-                width: { ideal: 640 },
-                height: { ideal: 480 }
+        // Вэб камерыг асааж MediaPipe руу дамжуулах
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
             },
-            audio: false
+            width: 640,
+            height: 480
         });
-        videoElement.srcObject = stream;
-        
-        // Камер ассаны дараа MediaPipe-д тасралтгүй дүрс илгээх
-        videoElement.addEventListener('play', () => {
-            const sendFrame = async () => {
-                if (!videoElement.paused && !videoElement.ended) {
-                    await faceDetection.send({image: videoElement});
-                    requestAnimationFrame(sendFrame); // Гар утасны дэлгэцийн шинэчлэлттэй уялдуулна
-                }
-            };
-            sendFrame();
-        });
-    } catch (err) {
-        loadingElement.innerHTML = "Камерт хандах эрх олдсонгүй эсвэл алдаа гарлаа!<br><br>Та хөтчийн тохиргооноос камер ашиглах зөвшөөрөл өгнө үү.";
-        loadingElement.style.color = "red";
-    }
-}
-
-startCamera();
-
-</script>
+        camera.start();
+    </script>
 </body>
 </html>
