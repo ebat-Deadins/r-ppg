@@ -2,14 +2,59 @@
 <html lang="mn">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Уналт болон Хөдөлгөөнгүй байдал илрүүлэгч (Web)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Уналт илрүүлэгч (Mobile Responsive)</title>
     <style>
-        body { margin: 0; padding: 20px; font-family: sans-serif; background-color: #121212; color: #ffffff; display: flex; flex-direction: column; align-items: center; }
-        .container { position: relative; width: 980px; height: 740px; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        video { position: absolute; top: 0; left: 0; width: 980px; height: 740px; display: none; /* Харагдахгүй, зөвхөн canvas дээр зурна */ }
-        canvas { position: absolute; top: 0; left: 0; width: 980px; height: 740px; }
-        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; color: #00ff00; }
+        body { 
+            margin: 0; 
+            padding: 10px; 
+            font-family: sans-serif; 
+            background-color: #121212; 
+            color: #ffffff; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            box-sizing: border-box;
+            min-height: 100vh;
+        }
+        h2 {
+            font-size: 1.2rem;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        /* Утсанд тааруулж автоматаар хэмжээгээ өөрчлөх Container */
+        .container { 
+            position: relative; 
+            width: 100%; 
+            max-width: 980px; 
+            aspect-ratio: 980 / 740; /* Унаган харьцааг хадгалах */
+            background: #000; 
+            border-radius: 8px; 
+            overflow: hidden; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); 
+        }
+        video { 
+            display: none; /* Харагдахгүй, зөвхөн canvas дээр зурна */ 
+        }
+        /* Canvas нь container-ын 100% зайг эзлэнэ */
+        canvas { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            display: block;
+        }
+        #loading { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            font-size: clamp(16px, 4vw, 24px); 
+            color: #00ff00; 
+            text-align: center;
+            width: 90%;
+        }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
@@ -22,7 +67,7 @@
 </head>
 <body>
 
-    <h2>Уналт болон Хөдөлгөөнгүй байдал илрүүлэгч</h2>
+    <h2>Уналт & Хөдөлгөөнгүй байдал илрүүлэгч</h2>
     <div class="container">
         <div id="loading">Моделуудыг ачаалж байна, түр хүлээнэ үү...</div>
         <video id="video" autoplay playsinline></video>
@@ -31,10 +76,10 @@
 
     <script>
         // ── Тохиргооны утгууд ─────────────────────────────────────────────────────────
-        const YOLO_CONF_THRESHOLD = 0.60;      // COCO-SSD итгэлцлийн доод хувь (60%)
-        const FALL_VELOCITY_THRESHOLD = 0.5;   // Босоо хурдны (Vy) уналтын босго
-        const MOTIONLESS_PIXEL_THRESHOLD = 6;  // Хөдөлгөөнгүй гэж тооцох пиксель зай
-        const MOTIONLESS_TIME_LIMIT = 15.0;    // Хөдөлгөөнгүй alert гаргах секунд
+        const YOLO_CONF_THRESHOLD = 0.60;
+        const FALL_VELOCITY_THRESHOLD = 0.5;
+        const MOTIONLESS_PIXEL_THRESHOLD = 6;
+        const MOTIONLESS_TIME_LIMIT = 15.0;
         
         // ── Төлөв хадгалах хувьсагчууд ───────────────────────────────────────────────
         let prevHipPos = null;
@@ -45,24 +90,22 @@
         let fallAlertTriggered = false;
         let frameCount = 0;
 
-        // HTML элементүүд
         const videoElement = document.getElementById('video');
         const canvasElement = document.getElementById('canvas');
         const canvasCtx = canvasElement.getContext('2d');
         const loadingElement = document.getElementById('loading');
-
         let objectDetector;
 
         // ── Туслах функц ──────────────────────────────────────────────────────────────
         function calculateAngle(a, b) {
-            // Мөр болон ташааны хоорондох өнцгийг тооцоолох
             const dy = b.y - a.y;
             const dx = b.x - a.x;
             let theta = Math.atan2(dy, dx) * 180.0 / Math.PI;
             return Math.abs(theta);
         }
 
-        function drawText(text, x, y, color, size = "20px") {
+        // Текстийн хэмжээг утсанд илүү тод харагдуулахын тулд бага зэрэг томсгов
+        function drawText(text, x, y, color, size = "28px") {
             canvasCtx.fillStyle = color;
             canvasCtx.font = `bold ${size} Arial`;
             canvasCtx.fillText(text, x, y);
@@ -72,7 +115,7 @@
         // ҮНДСЭН ГҮЙЦЭТГЭЛ
         // ══════════════════════════════════════════════════════════════════════════════
         async function initialize() {
-            // 1. COCO-SSD ачаалах (YOLO орлуулагч)
+            // 1. COCO-SSD ачаалах
             objectDetector = await cocoSsd.load();
 
             // 2. MediaPipe Pose ачаалах
@@ -81,7 +124,7 @@
             }});
             
             pose.setOptions({
-                modelComplexity: 1,
+                modelComplexity: 1, // Гар утсанд 0 эсвэл 1 тохиромжтой (илүү хурдан)
                 smoothLandmarks: true,
                 minDetectionConfidence: 0.5,
                 minTrackingConfidence: 0.5
@@ -89,45 +132,41 @@
 
             pose.onResults(onPoseResults);
 
-            // 3. Камер ачаалах
+            // 3. Камер ачаалах (Арын камерыг ашиглахыг оролдоно)
             const camera = new Camera(videoElement, {
                 onFrame: async () => {
                     await pose.send({image: videoElement});
                 },
                 width: 980,
-                height: 740
+                height: 740,
+                facingMode: 'environment' // Утасны арын камер
             });
             camera.start();
         }
 
         async function onPoseResults(results) {
-            loadingElement.style.display = 'none'; // Ачаалж дууссан
+            loadingElement.style.display = 'none';
             
             const w = canvasElement.width;
             const h = canvasElement.height;
 
-            // Зургийг Canvas дээр зурах
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, w, h);
             canvasCtx.drawImage(results.image, 0, 0, w, h);
 
-            // Delta-t тооцоолол
             const currentTime = performance.now() / 1000;
             const dt = Math.max(currentTime - prevTime, 0.001);
             prevTime = currentTime;
 
-            // Анхны утгууд
             let status = "Normal";
-            let color = "#00FF00"; // Ногоон
+            let color = "#00FF00";
             let angle = 0;
             let v_y = 0.0;
             let yoloFall = false;
             let poseFall = false;
             let fallPositions = [];
 
-            // ════════════════════════════════════════════════════════════════════
-            // 1. Object Detection: Хүн илрүүлэх + Bounding-box харьцааны шалгалт
-            // ════════════════════════════════════════════════════════════════════
+            // Object Detection (Bounding Box)
             const predictions = await objectDetector.detect(videoElement);
             
             predictions.forEach(prediction => {
@@ -135,15 +174,13 @@
                     const [x, y, width, height] = prediction.bbox;
                     const confPct = Math.round(prediction.score * 100);
 
-                    // Bounding Box зурах
                     canvasCtx.beginPath();
                     canvasCtx.rect(x, y, width, height);
-                    canvasCtx.lineWidth = 2;
+                    canvasCtx.lineWidth = 4;
                     canvasCtx.strokeStyle = "#FF00FF";
                     canvasCtx.stroke();
-                    drawText(`Person ${confPct}%`, x + 5, y - 5, "#FF00FF", "16px");
+                    drawText(`Person ${confPct}%`, x + 5, y - 10, "#FF00FF", "22px");
 
-                    // Өргөн нь өндрөөсөө урт байвал хэвтсэн (унасан) гэж үзнэ
                     if (width > height) {
                         yoloFall = true;
                         fallPositions.push({x, y});
@@ -151,22 +188,17 @@
                 }
             });
 
-            // ════════════════════════════════════════════════════════════════════
-            // 2. MediaPipe Pose: Өнцөг + Босоо Хурд (Vy) + Хөдөлгөөнгүй байдал
-            // ════════════════════════════════════════════════════════════════════
+            // MediaPipe Pose Tracking
             if (results.poseLandmarks) {
                 const landmarks = results.poseLandmarks;
-                
-                // Зүүн мөр (11) болон Зүүн ташаа (23)
                 const ls = landmarks[11];
                 const lh = landmarks[23];
 
                 if (ls.visibility > 0.5 && lh.visibility > 0.5) {
                     angle = calculateAngle(ls, lh);
                     const currentHipPos = { x: lh.x * w, y: lh.y * h };
-                    const currentY = lh.y; // Normalized [0.0 - 1.0]
+                    const currentY = lh.y; 
 
-                    // — Vy: босоо хурдыг тооцоолж уналт шалгах —
                     if (prevY !== null) {
                         v_y = (currentY - prevY) / dt;
                         if ((angle < 45 || angle > 135) && v_y > FALL_VELOCITY_THRESHOLD) {
@@ -175,7 +207,6 @@
                     }
                     prevY = currentY;
 
-                    // — Хөдөлгөөнгүй байдлын шалгалт —
                     if (prevHipPos !== null) {
                         const dist = Math.hypot(currentHipPos.x - prevHipPos.x, currentHipPos.y - prevHipPos.y);
                         
@@ -184,11 +215,11 @@
                                 motionlessStart = currentTime;
                             } else {
                                 const elapsed = currentTime - motionlessStart;
-                                drawText(`Still: ${Math.floor(elapsed)}s`, 20, 360, "#FFA500", "24px");
+                                drawText(`Still: ${Math.floor(elapsed)}s`, 20, h - 40, "#FFA500", "36px");
                                 
                                 if (elapsed >= MOTIONLESS_TIME_LIMIT) {
                                     status = "ALERT: MOTIONLESS 15S!";
-                                    color = "#FF0000"; // Улаан
+                                    color = "#FF0000";
                                     if (!alertTriggered) {
                                         console.warn("ALERT: MOTIONLESS!");
                                         alertTriggered = true;
@@ -202,16 +233,14 @@
                     }
                     prevHipPos = currentHipPos;
 
-                    // Зураасуудыг зурах
-                    drawConnectors(canvasCtx, landmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
+                    drawConnectors(canvasCtx, landmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2, radius: 4});
                     
-                    // Мөрнөөс ташаа хүртэлх онцгой зураас
                     canvasCtx.beginPath();
                     canvasCtx.moveTo(ls.x * w, ls.y * h);
                     canvasCtx.lineTo(currentHipPos.x, currentHipPos.y);
-                    canvasCtx.strokeStyle = "#FFFF00"; // Шар
-                    canvasCtx.lineWidth = 3;
+                    canvasCtx.strokeStyle = "#FFFF00";
+                    canvasCtx.lineWidth = 5;
                     canvasCtx.stroke();
                 }
             } else {
@@ -220,20 +249,17 @@
                 prevY = null;
             }
 
-            // ════════════════════════════════════════════════════════════════════
-            // 3. Хавсарсан уналтын шийдвэр
-            // ════════════════════════════════════════════════════════════════════
+            // Fall Detection Logic
             if (yoloFall || poseFall) {
                 status = "FALL DETECTED!";
                 color = "#FF0000";
 
-                // Box-оор илэрсэн хүмүүс дээр текст гаргах
                 fallPositions.forEach(pos => {
-                    drawText("FALL DETECTED", pos.x, Math.max(pos.y - 40, 30), "#FF0000", "30px");
+                    drawText("FALL DETECTED", pos.x, Math.max(pos.y - 40, 30), "#FF0000", "40px");
                 });
 
                 if (poseFall && fallPositions.length === 0) {
-                    drawText("FALL DETECTED", 20, 410, "#FF0000", "30px");
+                    drawText("FALL DETECTED", 20, h - 80, "#FF0000", "40px");
                 }
 
                 if (!fallAlertTriggered) {
@@ -244,23 +270,20 @@
                 fallAlertTriggered = false;
             }
 
-            // ════════════════════════════════════════════════════════════════════
-            // HUD: Дэлгэц дээр бүх мэдээллийг харуулах
-            // ════════════════════════════════════════════════════════════════════
-            drawText(`Status: ${status}`, 20, 50, color, "28px");
-            drawText(`Angle: ${Math.round(angle)} deg`, 20, 95, color, "22px");
-            drawText(`Vy: ${v_y.toFixed(2)}`, 20, 135, color, "22px");
+            // HUD
+            drawText(`Status: ${status}`, 20, 60, color, "36px");
+            drawText(`Angle: ${Math.round(angle)} deg`, 20, 110, color, "28px");
+            drawText(`Vy: ${v_y.toFixed(2)}`, 20, 150, color, "28px");
             
-            drawText(`YOLO (Box): ${yoloFall ? 'FALL' : 'OK'}`, 20, 180, yoloFall ? "#FF0000" : "#00FF00", "20px");
-            drawText(`Pose: ${poseFall ? 'FALL' : 'OK'}`, 20, 220, poseFall ? "#FF0000" : "#00FF00", "20px");
+            drawText(`Box (YOLO): ${yoloFall ? 'FALL' : 'OK'}`, 20, 200, yoloFall ? "#FF0000" : "#00FF00", "26px");
+            drawText(`Pose (Skltn): ${poseFall ? 'FALL' : 'OK'}`, 20, 240, poseFall ? "#FF0000" : "#00FF00", "26px");
             
             const fps = Math.round(1 / dt);
-            drawText(`FPS: ${fps}`, 20, 260, "#B4B4B4", "18px");
+            drawText(`FPS: ${fps}`, 20, 280, "#B4B4B4", "24px");
 
             canvasCtx.restore();
         }
 
-        // Эхлүүлэх
         window.onload = initialize;
     </script>
 </body>
