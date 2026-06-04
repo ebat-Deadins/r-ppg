@@ -3,355 +3,265 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>r-PPG Vital Signs Monitor — MediaPipe Web Edition</title>
+    <title>Уналт болон Хөдөлгөөнгүй байдал илрүүлэгч (Web)</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: sans-serif; background-color: #121212; color: #ffffff; display: flex; flex-direction: column; align-items: center; }
+        .container { position: relative; width: 980px; height: 740px; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        video { position: absolute; top: 0; left: 0; width: 980px; height: 740px; display: none; /* Харагдахгүй, зөвхөн canvas дээр зурна */ }
+        canvas { position: absolute; top: 0; left: 0; width: 980px; height: 740px; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; color: #00ff00; }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: #101010;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            overflow: hidden;
-        }
-
-        #container {
-            position: relative;
-            width: 640px;
-            height: 480px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        /* Камерын видеог нууж, canvas дээр зурах */
-        #webcam {
-            display: none;
-            transform: scaleX(-1);
-        }
-
-        #output_canvas {
-            width: 100%;
-            height: 100%;
-            background-color: #000;
-        }
-
-        /* Хянах самбар (HUD overlay) */
-        #hud {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 260px;
-            background: rgba(15, 15, 15, 0.75);
-            padding: 15px;
-            border-bottom-right-radius: 8px;
-            box-sizing: border-box;
-            pointer-events: none;
-        }
-
-        .metric {
-            margin-bottom: 12px;
-        }
-
-        .label {
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #888;
-        }
-
-        .value {
-            font-size: 24px;
-            font-weight: bold;
-        }
-
-        #hr-val { color: #00dc3c; }
-        #spo2-val { color: #00dc3c; }
-
-        /* Буферын дүүргэлтийн мөр */
-        #buffer-container {
-            margin-top: 5px;
-            width: 100%;
-            background-color: #373737;
-            height: 6px;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        #buffer-bar {
-            width: 0%;
-            height: 100%;
-            background-color: #00b0d2;
-            transition: width 0.1s linear;
-        }
-
-        #disclaimer {
-            position: absolute;
-            bottom: 10px;
-            left: 15px;
-            font-size: 11px;
-            color: #ff8c00;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-            pointer-events: none;
-        }
-
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 18px;
-            color: #00b0d2;
-            text-align: center;
-        }
-    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
-    <div id="container">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="output_canvas" width="640" height="480"></canvas>
-        
-        <div id="hud">
-            <div class="metric">
-                <div class="label">Зүрхний цохилт</div>
-                <div id="hr-val" class="value">Хэмжиж байна...</div>
-            </div>
-            <div class="metric">
-                <div class="label">Хүчилтөрөгчийн хангамж (SpO2)</div>
-                <div id="spo2-val" class="value">Хэмжиж байна...</div>
-            </div>
-            <div>
-                <div class="label" style="font-size: 10px;">Буфер хуримтлал</div>
-                <div id="buffer-container">
-                    <div id="buffer-bar"></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="disclaimer">ЭМНЭЛГИЙН ХЭРЭГСЭЛ БИШ | СУДЛАЛЫН ПРОТОТАЙП</div>
-        <div id="loading">MediaPipe Модель уншиж байна...<br><span style="font-size: 12px; color: #666;">Камерын зөвшөөрөл өгнө үү</span></div>
+    <h2>Уналт болон Хөдөлгөөнгүй байдал илрүүлэгч</h2>
+    <div class="container">
+        <div id="loading">Моделуудыг ачаалж байна, түр хүлээнэ үү...</div>
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" width="980" height="740"></canvas>
     </div>
 
     <script>
-        const videoElement = document.getElementById('webcam');
-        const canvasElement = document.getElementById('output_canvas');
-        const canvasCtx = canvasElement.getContext('2d');
-        const loadingDiv = document.getElementById('loading');
+        // ── Тохиргооны утгууд ─────────────────────────────────────────────────────────
+        const YOLO_CONF_THRESHOLD = 0.60;      // COCO-SSD итгэлцлийн доод хувь (60%)
+        const FALL_VELOCITY_THRESHOLD = 0.5;   // Босоо хурдны (Vy) уналтын босго
+        const MOTIONLESS_PIXEL_THRESHOLD = 6;  // Хөдөлгөөнгүй гэж тооцох пиксель зай
+        const MOTIONLESS_TIME_LIMIT = 15.0;    // Хөдөлгөөнгүй alert гаргах секунд
         
-        const hrVal = document.getElementById('hr-val');
-        const spo2Val = document.getElementById('spo2-val');
-        const bufferBar = document.getElementById('buffer-bar');
+        // ── Төлөв хадгалах хувьсагчууд ───────────────────────────────────────────────
+        let prevHipPos = null;
+        let prevY = null;
+        let prevTime = performance.now() / 1000;
+        let motionlessStart = null;
+        let alertTriggered = false;
+        let fallAlertTriggered = false;
+        let frameCount = 0;
 
-        // Тохиргоо
-        const BUFFER_SIZE = 150; // ~5 секунд (30fps гэж үзвэл)
-        let redBuf = [];
-        let greenBuf = [];
-        let blueBuf = [];
-        let tBuf = [];
+        // HTML элементүүд
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingElement = document.getElementById('loading');
 
-        let bpmHist = [];
-        let spo2Hist = [];
+        let objectDetector;
 
-        // Дундаж олох функц
-        const arrayMean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-
-        // Энгийн Bandpass шүүлтүүр (0.75Hz - 3.0Hz буюу 45-180 BPM)
-        function simpleBandpass(signal, fs) {
-            // Энд хөтөч дээр хурдан ажиллуулах үүднээс хялбаршуулсан moving average шүүлтүүр ашиглав
-            let dc = arrayMean(signal);
-            let acSignal = signal.map(v => v - dc);
-            return acSignal; // Бодит FFT-ийг доорх давтамжийн шинжилгээгээр орлуулсан
+        // ── Туслах функц ──────────────────────────────────────────────────────────────
+        function calculateAngle(a, b) {
+            // Мөр болон ташааны хоорондох өнцгийг тооцоолох
+            const dy = b.y - a.y;
+            const dx = b.x - a.x;
+            let theta = Math.atan2(dy, dx) * 180.0 / Math.PI;
+            return Math.abs(theta);
         }
 
-        // Дохионоос хамгийн өндөр давтамжийг олж BPM тооцоолох (FFT орлуулагч)
-        function extractBpm(signal, fs) {
-            let peaks = 0;
-            for (let i = 1; i < signal.length - 1; i++) {
-                if (signal[i] > signal[i-1] && signal[i] > signal[i+1] && signal[i] > 0) {
-                    peaks++;
-                }
-            }
-            let durationSeconds = signal.length / fs;
-            let bps = peaks / durationSeconds;
-            let bpm = bps * 60 * 2; // Үечлэлийг тааруулах коэффициент
+        function drawText(text, x, y, color, size = "20px") {
+            canvasCtx.fillStyle = color;
+            canvasCtx.font = `bold ${size} Arial`;
+            canvasCtx.fillText(text, x, y);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════════
+        // ҮНДСЭН ГҮЙЦЭТГЭЛ
+        // ══════════════════════════════════════════════════════════════════════════════
+        async function initialize() {
+            // 1. COCO-SSD ачаалах (YOLO орлуулагч)
+            objectDetector = await cocoSsd.load();
+
+            // 2. MediaPipe Pose ачаалах
+            const pose = new Pose({locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+            }});
             
-            if (bpm >= 45 && bpm <= 180) return bpm;
-            return 0;
+            pose.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            pose.onResults(onPoseResults);
+
+            // 3. Камер ачаалах
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await pose.send({image: videoElement});
+                },
+                width: 980,
+                height: 740
+            });
+            camera.start();
         }
 
-        // SpO2 тооцоолох
-        function estimateSpo2(rBuf, bBuf, fs) {
-            let dc_r = arrayMean(rBuf);
-            let dc_b = arrayMean(bBuf);
+        async function onPoseResults(results) {
+            loadingElement.style.display = 'none'; // Ачаалж дууссан
+            
+            const w = canvasElement.width;
+            const h = canvasElement.height;
 
-            if (dc_r < 1 || dc_b < 1) return 0;
-
-            // AC бүрэлдэхүүнийг Standard Deviation-оор төлөөлүүлэх
-            let ac_r = Math.sqrt(arrayMean(rBuf.map(v => Math.pow(v - dc_r, 2))));
-            let ac_b = Math.sqrt(arrayMean(bBuf.map(v => Math.pow(v - dc_b, 2))));
-
-            if (ac_b < 1e-9) return 0;
-
-            let R = (ac_r / dc_r) / (ac_b / dc_b);
-            let spo2 = 110.0 - 25.0 * R;
-            return Math.min(100, Math.max(70, spo2));
-        }
-
-        // Магни дундажлах (Хөмсөг, духны цэгүүд)
-        // MediaPipe Face Mesh индексүүд: Духны дээд цэг = 10, Хөмсөг = 70, 63, 105, 66, 107, 300, 293, 334, 296, 336
-        const BROW_LM = [70, 63, 105, 66, 107, 300, 293, 334, 296, 336];
-        const TEMPLE_LM = [234, 127, 454, 356];
-        const APEX_LM = 10;
-
-        function onResults(results) {
-            // Модель ачааллаж дууссаныг мэдэгдэх
-            if (loadingDiv) loadingDiv.style.display = 'none';
-
-            // Canvas-ийг бэлдэх болон толин тусгал үүсгэх
+            // Зургийг Canvas дээр зурах
             canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.clearRect(0, 0, w, h);
+            canvasCtx.drawImage(results.image, 0, 0, w, h);
+
+            // Delta-t тооцоолол
+            const currentTime = performance.now() / 1000;
+            const dt = Math.max(currentTime - prevTime, 0.001);
+            prevTime = currentTime;
+
+            // Анхны утгууд
+            let status = "Normal";
+            let color = "#00FF00"; // Ногоон
+            let angle = 0;
+            let v_y = 0.0;
+            let yoloFall = false;
+            let poseFall = false;
+            let fallPositions = [];
+
+            // ════════════════════════════════════════════════════════════════════
+            // 1. Object Detection: Хүн илрүүлэх + Bounding-box харьцааны шалгалт
+            // ════════════════════════════════════════════════════════════════════
+            const predictions = await objectDetector.detect(videoElement);
             
-            // Камерын дүрсийг хэвтээгээр эргүүлж (selfie mirror) canvas дээр зурах
-            canvasCtx.translate(canvasElement.width, 0);
-            canvasCtx.scale(-1, 1);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+            predictions.forEach(prediction => {
+                if (prediction.class === 'person' && prediction.score >= YOLO_CONF_THRESHOLD) {
+                    const [x, y, width, height] = prediction.bbox;
+                    const confPct = Math.round(prediction.score * 100);
 
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-                const w = canvasElement.width;
-                const h = canvasElement.height;
-
-                // Цэгүүдийг зурах (Ногоон өнгөөр)
-                canvasCtx.fillStyle = '#00c850';
-                for (const lm of landmarks) {
+                    // Bounding Box зурах
                     canvasCtx.beginPath();
-                    canvasCtx.arc(lm.x * w, lm.y * h, 1, 0, 2 * Math.PI);
-                    canvasCtx.fill();
-                }
+                    canvasCtx.rect(x, y, width, height);
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.strokeStyle = "#FF00FF";
+                    canvasCtx.stroke();
+                    drawText(`Person ${confPct}%`, x + 5, y - 5, "#FF00FF", "16px");
 
-                // Духны ROI (Талбай) тооцоолох
-                let browY = Math.min(...BROW_LM.map(i => landmarks[i].y));
-                let apexY = landmarks[APEX_LM].y;
-                let templeXs = TEMPLE_LM.map(i => landmarks[i].x);
-                let rawL = Math.min(...templeXs);
-                let rawR = Math.max(...templeXs);
-                let span = rawR - rawL;
-
-                // 10% хажуугийн зай авах
-                let fx1 = Math.floor((rawL + 0.10 * span) * w);
-                let fx2 = Math.floor((rawR - 0.10 * span) * w);
-                let fy1 = Math.floor(apexY * h) + 2;
-                let fy2 = Math.floor(browY * h) - 2;
-
-                if (fy2 > fy1 && fx2 > fx1) {
-                    // ROI талбайг зурах (Цэнхэрдүү ногоон)
-                    canvasCtx.strokeStyle = '#00ffc8';
-                    canvasCtx.lineWidth = 1;
-                    canvasCtx.strokeRect(fx1, fy1, fx2 - fx1, fy2 - fy1);
-
-                    // ROI доторх пикселүүдийн өнгийг унших
-                    try {
-                        let imgData = canvasCtx.getImageData(fx1, fy1, fx2 - fx1, fy2 - fy1);
-                        let data = imgData.data;
-                        let rSum = 0, gSum = 0, bSum = 0;
-                        let count = 0;
-
-                        for (let i = 0; i < data.length; i += 4) {
-                            rSum += data[i];
-                            gSum += data[i+1];
-                            bSum += data[i+2];
-                            count++;
-                        }
-
-                        if (count > 0) {
-                            let now = performance.now() / 1000;
-                            redBuf.push(rSum / count);
-                            greenBuf.push(gSum / count);
-                            blueBuf.push(bSum / count);
-                            tBuf.push(now);
-
-                            // Буфер хэтэрвэл эхнийхийг устгах
-                            if (redBuf.length > BUFFER_SIZE) {
-                                redBuf.shift();
-                                greenBuf.shift();
-                                blueBuf.shift();
-                                tBuf.shift();
-                            }
-
-                            // Буферын явцыг шинэчлэх
-                            let pct = (greenBuf.length / BUFFER_SIZE) * 100;
-                            bufferBar.style.width = `${pct}%`;
-
-                            // Буфер дүүрсэн үед тооцоог хийнэ
-                            if (greenBuf.length === BUFFER_SIZE) {
-                                let fps = greenBuf.length / (tBuf[tBuf.length - 1] - tBuf[0]);
-                                
-                                // Зүрхний цохилт (Green Channel)
-                                let fg = simpleBandpass(greenBuf, fps);
-                                let rawBpm = extractBpm(fg, fps);
-                                if (rawBpm > 0) {
-                                    bpmHist.push(rawBpm);
-                                    if (bpmHist.length > 5) bpmHist.shift();
-                                    let finalBpm = arrayMean(bpmHist);
-                                    hrVal.innerText = `${finalBpm.toFixed(1)} BPM`;
-                                }
-
-                                // Хүчилтөрөгч (SpO2)
-                                let rawSpo2 = estimateSpo2(redBuf, blueBuf, fps);
-                                if (rawSpo2 > 0) {
-                                    spo2Hist.push(rawSpo2);
-                                    if (spo2Hist.length > 10) spo2Hist.shift();
-                                    let finalSpo2 = arrayMean(spo2Hist);
-                                    
-                                    // Өнгөөр ангилах
-                                    if (finalSpo2 >= 95) spo2Val.style.color = '#00dc3c';
-                                    else if (finalSpo2 >= 90) spo2Val.style.color = '#ffaa00';
-                                    else spo2Val.style.color = '#ff3c3c';
-
-                                    spo2Val.innerText = `${finalSpo2.toFixed(1)} %`;
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        // Зургийн талбай хөтчийн хязгаараас гарсан үед алдааг алгасах
+                    // Өргөн нь өндрөөсөө урт байвал хэвтсэн (унасан) гэж үзнэ
+                    if (width > height) {
+                        yoloFall = true;
+                        fallPositions.push({x, y});
                     }
                 }
+            });
+
+            // ════════════════════════════════════════════════════════════════════
+            // 2. MediaPipe Pose: Өнцөг + Босоо Хурд (Vy) + Хөдөлгөөнгүй байдал
+            // ════════════════════════════════════════════════════════════════════
+            if (results.poseLandmarks) {
+                const landmarks = results.poseLandmarks;
+                
+                // Зүүн мөр (11) болон Зүүн ташаа (23)
+                const ls = landmarks[11];
+                const lh = landmarks[23];
+
+                if (ls.visibility > 0.5 && lh.visibility > 0.5) {
+                    angle = calculateAngle(ls, lh);
+                    const currentHipPos = { x: lh.x * w, y: lh.y * h };
+                    const currentY = lh.y; // Normalized [0.0 - 1.0]
+
+                    // — Vy: босоо хурдыг тооцоолж уналт шалгах —
+                    if (prevY !== null) {
+                        v_y = (currentY - prevY) / dt;
+                        if ((angle < 45 || angle > 135) && v_y > FALL_VELOCITY_THRESHOLD) {
+                            poseFall = true;
+                        }
+                    }
+                    prevY = currentY;
+
+                    // — Хөдөлгөөнгүй байдлын шалгалт —
+                    if (prevHipPos !== null) {
+                        const dist = Math.hypot(currentHipPos.x - prevHipPos.x, currentHipPos.y - prevHipPos.y);
+                        
+                        if (dist < MOTIONLESS_PIXEL_THRESHOLD) {
+                            if (motionlessStart === null) {
+                                motionlessStart = currentTime;
+                            } else {
+                                const elapsed = currentTime - motionlessStart;
+                                drawText(`Still: ${Math.floor(elapsed)}s`, 20, 360, "#FFA500", "24px");
+                                
+                                if (elapsed >= MOTIONLESS_TIME_LIMIT) {
+                                    status = "ALERT: MOTIONLESS 15S!";
+                                    color = "#FF0000"; // Улаан
+                                    if (!alertTriggered) {
+                                        console.warn("ALERT: MOTIONLESS!");
+                                        alertTriggered = true;
+                                    }
+                                }
+                            }
+                        } else {
+                            motionlessStart = null;
+                            alertTriggered = false;
+                        }
+                    }
+                    prevHipPos = currentHipPos;
+
+                    // Зураасуудыг зурах
+                    drawConnectors(canvasCtx, landmarks, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
+                    
+                    // Мөрнөөс ташаа хүртэлх онцгой зураас
+                    canvasCtx.beginPath();
+                    canvasCtx.moveTo(ls.x * w, ls.y * h);
+                    canvasCtx.lineTo(currentHipPos.x, currentHipPos.y);
+                    canvasCtx.strokeStyle = "#FFFF00"; // Шар
+                    canvasCtx.lineWidth = 3;
+                    canvasCtx.stroke();
+                }
+            } else {
+                motionlessStart = null;
+                alertTriggered = false;
+                prevY = null;
             }
+
+            // ════════════════════════════════════════════════════════════════════
+            // 3. Хавсарсан уналтын шийдвэр
+            // ════════════════════════════════════════════════════════════════════
+            if (yoloFall || poseFall) {
+                status = "FALL DETECTED!";
+                color = "#FF0000";
+
+                // Box-оор илэрсэн хүмүүс дээр текст гаргах
+                fallPositions.forEach(pos => {
+                    drawText("FALL DETECTED", pos.x, Math.max(pos.y - 40, 30), "#FF0000", "30px");
+                });
+
+                if (poseFall && fallPositions.length === 0) {
+                    drawText("FALL DETECTED", 20, 410, "#FF0000", "30px");
+                }
+
+                if (!fallAlertTriggered) {
+                    console.warn("ALERT: FALL DETECTED!");
+                    fallAlertTriggered = true;
+                }
+            } else {
+                fallAlertTriggered = false;
+            }
+
+            // ════════════════════════════════════════════════════════════════════
+            // HUD: Дэлгэц дээр бүх мэдээллийг харуулах
+            // ════════════════════════════════════════════════════════════════════
+            drawText(`Status: ${status}`, 20, 50, color, "28px");
+            drawText(`Angle: ${Math.round(angle)} deg`, 20, 95, color, "22px");
+            drawText(`Vy: ${v_y.toFixed(2)}`, 20, 135, color, "22px");
+            
+            drawText(`YOLO (Box): ${yoloFall ? 'FALL' : 'OK'}`, 20, 180, yoloFall ? "#FF0000" : "#00FF00", "20px");
+            drawText(`Pose: ${poseFall ? 'FALL' : 'OK'}`, 20, 220, poseFall ? "#FF0000" : "#00FF00", "20px");
+            
+            const fps = Math.round(1 / dt);
+            drawText(`FPS: ${fps}`, 20, 260, "#B4B4B4", "18px");
+
             canvasCtx.restore();
         }
 
-        // MediaPipe Face Mesh тохиргоог асаах
-        const faceMesh = new FaceMesh({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-        });
-
-        faceMesh.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: true, // 478 цэг ашиглахын тулд true болгоно
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-        
-        faceMesh.onResults(onResults);
-
-        // Вэб камерыг асааж MediaPipe руу дамжуулах
-        const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await faceMesh.send({image: videoElement});
-            },
-            width: 640,
-            height: 480
-        });
-        camera.start();
+        // Эхлүүлэх
+        window.onload = initialize;
     </script>
 </body>
 </html>
